@@ -4,6 +4,11 @@
 #include "beacon_compatibility.h"
 #include "COFF_Loader.h"
 
+#if defined(_WIN64)
+#define PREPENDSYMBOLVALUE "__imp_"
+#else
+#define PREPENDSYMBOLVALUE "__imp__"
+#endif
 
 #pragma region general functions
 PBYTE mem_alloc(SIZE_T size, UINT32 flags, UINT32 protection) {
@@ -74,9 +79,9 @@ LPVOID process_external_symbol(PCHAR symbolstring) {
 	PCHAR therest = NULL;
 
 
-	CHAR prefix[] = "__imp_";
-	CHAR prefix_beacon[] = "__imp_Beacon";
-	CHAR prefix_towidechar[] = "__imp_toWideChar";
+	CHAR prefix[] = PREPENDSYMBOLVALUE;
+	CHAR prefix_beacon[] = PREPENDSYMBOLVALUE"Beacon";
+	CHAR prefix_towidechar[] = PREPENDSYMBOLVALUE"toWideChar";
 	size_t prefix_len = strlen(prefix);
 
 	/* the symbol name doesn't conform to our naming convention */
@@ -150,6 +155,7 @@ VOID coff_apply_relocations(PUINT32 P, PBYTE S, UINT16 Type, UINT32 SymOffset) {
 //	case IMAGE_REL_AMD64_REL32: *P += (S + SymOffset - P - 4); break;
 //	case IMAGE_REL_AMD64_ADDR32NB: *P = (S - P - 4); break;
 //	case IMAGE_REL_AMD64_ADDR64: *P = (*P + S);  break;
+	case IMAGE_REL_I386_DIR32:*P = (*P + S); break;
 	default:
 		DEBUG_PRINT("NO CODE TO RELOCATE TYPE: %d\n", Type);
 		break;
@@ -303,23 +309,39 @@ BOOL coff_relocate_text_section(coff_object coff) {
 
 		if (isExternal)
 		{
+#if defined(_WIN64)
 			PUINT64 pFunction;
+#else
+			PUINT32 pFunction;
+#endif
 			UINT32 StringTableOffset = sym->first.value[1];
 			PCHAR function_full_name = ((PCHAR)(coff.symbol_table + ((FileHeader*)coff.pImageBase)->NumberOfSymbols) + StringTableOffset);
+#if defined(_WIN64)
 			PUINT64 func_addr2 = (PUINT64)(current_section_ptr + coff.pTextSectionHeader->SizeOfRawData);
+#else
+			PUINT32 func_addr2 = (PUINT32)(current_section_ptr + coff.pTextSectionHeader->SizeOfRawData);
+#endif
 
 			pFunction = process_external_symbol(function_full_name);
 
 			if (pFunction)
 			{
 				/* copy the address of the ext. function into the region right after the .text section */
+#if defined(_WIN64)
 				*(func_addr2 + (functionMappingCount)) = (UINT64)pFunction;
+#else
+				*(func_addr2 + (functionMappingCount)) = (UINT32)pFunction;
+#endif
 
+#if defined(_WIN64)
 				/* calculate the difference between P and the copied ext. func addr */
 				UINT32 v = (UINT32)((UINT32)(func_addr2 + (functionMappingCount)) - (UINT32)(P)-4);
 
 				/* copy the difference to P */
 				*(PINT32)P = v;
+#else
+				*(PINT32)P = func_addr2;
+#endif
 				functionMappingCount += 1;
 			}
 			else {
@@ -365,6 +387,11 @@ void main(int argc, char* argv[]) {
 	coff_object coff;
 	PCHAR arguments = NULL;
 	size_t arg_size = 0;
+#if  defined(_WIN64)
+	char* entryfuncname = "go";
+#else
+	char* entryfuncname = "_go";
+#endif
 
 	if (argc < 2) {
 		printf("not enough args...\nUsage: %s [path_to_obj_file] <opt: arguments>", argv[0]);
@@ -386,7 +413,7 @@ void main(int argc, char* argv[]) {
 		goto cleanup;
 
 
-	if (!coff_execute_entry(coff, "go", arguments, (UINT32)arg_size))
+	if (!coff_execute_entry(coff, entryfuncname, arguments, (UINT32)arg_size))
 		goto cleanup;
 
 	PCHAR outdata = BeaconGetOutputData(NULL);
