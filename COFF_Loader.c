@@ -340,7 +340,7 @@ BOOL coff_relocate_text_section(coff_object coff) {
 				/* copy the difference to P */
 				*(PINT32)P = v;
 #else
-				*(PINT32)P = func_addr2;
+				*(PINT32)P = ((UINT32)func_addr2 + (functionMappingCount * 4));
 #endif
 				functionMappingCount += 1;
 			}
